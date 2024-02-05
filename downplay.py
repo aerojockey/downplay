@@ -10,6 +10,13 @@ import xml.etree.ElementTree as ET
 from PySide import QtCore, QtGui
 from PySide.QtCore import Qt
 
+try:
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import pagesizes, units
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
+
 
 class ScriptEdit(QtGui.QTextEdit):
 
@@ -24,7 +31,7 @@ class ScriptEdit(QtGui.QTextEdit):
     REV_MARGINS = { v[0]:k for (k,v) in MARGINS.items() }
 
     statusChanged = QtCore.Signal(str)
-    
+
     def __init__(self,parent=None):
         super().__init__(parent)
 
@@ -50,13 +57,14 @@ class ScriptEdit(QtGui.QTextEdit):
             "Save a &Copy...", None, self.save_a_copy)
         self.export_as_text_action = self.create_action(
             "Export as continuous text...", None, self.export_as_text)
-        #self.export_as_pages_action = self.create_action(
-        #    "Export as paginated text...", None, self.export_as_pages)
-        #self.export_as_pdf_action = self.create_action(
-        #    "Export as PDF...", None, self.export_as_pdf)
+        self.export_as_pages_action = self.create_action(
+            "Export as paginated text...", None, self.export_as_pages)
+        self.export_as_pdf_action = self.create_action(
+            "Export as PDF...", None, self.export_as_pdf,
+            enabled=HAS_REPORTLAB)
         self.print_to_console_action = self.create_action(
             "Print to console", None, self.print_to_console)
-        
+
         self.undo_action = self.create_action(
             "&Undo", Qt.Key_Z | Qt.CTRL, self.undo)
         self.redo_action = self.create_action(
@@ -92,7 +100,7 @@ class ScriptEdit(QtGui.QTextEdit):
 
         font = QtGui.QFont("Courier New",12,QtGui.QFont.Normal,False)
         self.document().setDefaultFont(font)
-        
+
         text_option = QtGui.QTextOption()
         text_option.setAlignment(Qt.AlignLeft)
         text_option.setFlags(0)
@@ -100,7 +108,7 @@ class ScriptEdit(QtGui.QTextEdit):
         text_option.setTextDirection(Qt.LeftToRight)
         text_option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.document().setDefaultTextOption(text_option)
-        
+
         self.last_dirname = None
         self.current_filename = None
 
@@ -134,14 +142,15 @@ class ScriptEdit(QtGui.QTextEdit):
                                   self.changed_timer,
                                   QtCore.SLOT("start()"))
 
-    def create_action(self,label,shortcut=None,function=None):
+    def create_action(self,label,shortcut=None,function=None,enabled=True):
         action = QtGui.QAction(label,self)
+        action.setEnabled(enabled)
         if shortcut is not None:
             action.setShortcut(shortcut)
         if function is not None:
             action.triggered.connect(function)
         return action
-        
+
     def set_margin_type(self,margin_type):
         left_margin,right_margin = self.MARGINS[margin_type]
         cursor = self.textCursor()
@@ -234,7 +243,7 @@ class ScriptEdit(QtGui.QTextEdit):
             if isinstance(exc,IOError) and exc.errno == 2:
                 QtGui.QMessageBox.warning(
                     self,"File not found",
-                    "File %s not found" % basename)                
+                    "File %s not found" % basename)
             else:
                 QtGui.QMessageBox.warning(
                     self,"File error",
@@ -284,7 +293,7 @@ class ScriptEdit(QtGui.QTextEdit):
         self.last_dirname = os.path.dirname(filename)
         self.document().setModified(False)
         self.changed_timer.start()
-        
+
     def extract_xml(self):
         xdownplay = ET.Element("downplay")
         xdownplay.attrib["format"] = "1.0"
@@ -409,7 +418,89 @@ class ScriptEdit(QtGui.QTextEdit):
         text.append("")
         return "\n".join(text)
 
+    def paginate(self,xdownplay):
+        def page_break():
+            nonlocal line_number, page_number, eat_space
+            while line_number < 60:
+                text.append("")
+                line_number += 1
+            line_number = 0
+            page_number += 1
+            eat_space = True
+        def add_line(line):
+            nonlocal line_number, page_number, eat_space
+            if eat_space and line in (None,""):
+                eat_space = False
+                return
+            while line_number < 4:
+                if line_number == 2 and page_number > 1:
+                    text.append("%*s%d." % (55,"",page_number))
+                else:
+                    text.append("")
+                line_number += 1
+            text.append(line)
+            line_number += 1
+            if line_number >= 56:
+                page_break()
+            else:
+                eat_space = False
+        def add_lines(lines):
+            for line in lines:
+                add_line(line)
+        def add_clump(reserve=0):
+            if len(clump) == 0:
+                return
+            if len(clump) > 10:  # don't even try
+                add_lines(clump)
+                clump.clear()
+                return
+            if line_number + len(clump) + reserve > 56:
+                page_break()
+            add_lines(clump)
+            clump.clear()
+        text = []
+        line_number = 0
+        page_number = 1
+        eat_space = False
+        clump = []
+        for xp in xdownplay.findall('p'):
+            if xp.text in (None,""):
+                add_clump()
+                add_line("")
+                continue
+            style = xp.attrib["style"]
+            if style == "ACTION":
+                add_clump()
+                add_lines(self.format_paragraph(xp.text,0,60))
+            elif style == "DIALOGUE":
+                paragraph = self.format_paragraph(xp.text,10,35)
+                add_clump(max(2,len(paragraph)))
+                while line_number + len(paragraph) > 56:
+                    n_balance = 55-line_number
+                    balance,paragraph = paragraph[:n_balance],paragraph[n_balance,:]
+                    add_lines(balance)
+                    add_lines("%*s(MORE)" % (20,""))
+                add_lines(paragraph)
+            elif style == "NAME":
+                clump.extend(self.format_paragraph(xp.text,20,25))
+            elif style == "PARENTHETICAL":
+                clump.extend(self.format_paragraph(xp.text,10,35))
+            elif style == "TRANSITION":
+                add_clump()
+                add_lines(self.format_paragraph(xp.text,45,15))
+            else:
+                assert False
+        add_clump()
+        page_break()
+        return "\n".join(text)
+
     def export_as_text(self):
+        self.export_as_text_common(False)
+
+    def export_as_pages(self):
+        self.export_as_text_common(True)
+
+    def export_as_text_common(self,paginated):
         if self.last_dirname is not None:
             start_dirname = self.last_dirname
         else:
@@ -419,18 +510,62 @@ class ScriptEdit(QtGui.QTextEdit):
             start_pathname = os.path.join(start_dirname,stub+".txt")
         else:
             start_pathname = start_dirname
+        if paginated:
+            how = "paginated"
+        else:
+            how = "continuous"
         new_filename,filter = QtGui.QFileDialog.getSaveFileName(
-            self,"Export buffer as continuous text file...",start_pathname,
+            self,"Export buffer as %s text file..." % how,start_pathname,
             "Text files (*.txt);;All files (*)")
         if new_filename != "":
             if filter == "Text files (*.txt)":
                 stub,ext = os.path.splitext(new_filename)
                 if ext == "":
                     new_filename = "%s.txt" % stub
-                xdownplay,warnings = self.extract_xml()
+            xdownplay,warnings = self.extract_xml()
+            if paginated:
+                text = self.paginate(xdownplay)
+            else:
                 text = self.format(xdownplay)
-                with open(new_filename,"w",encoding='utf-8') as flo:
-                    flo.write(text)
+            with open(new_filename,"w",encoding='utf-8') as flo:
+                flo.write(text)
+
+    def export_as_pdf(self):
+        if self.last_dirname is not None:
+            start_dirname = self.last_dirname
+        else:
+            start_dirname = os.getcwd()
+        if self.current_filename is not None:
+            stub,ext = os.path.splitext(self.current_filename)
+            start_pathname = os.path.join(start_dirname,stub+".pdf")
+        else:
+            start_pathname = start_dirname
+        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+            self,"Export buffer as PDF file...",start_pathname,
+            "PDF files (*.pdf);;All files (*)")
+        if new_filename != "":
+            if filter == "PDF files (*.pdf)":
+                stub,ext = os.path.splitext(new_filename)
+                if ext == "":
+                    new_filename = "%s.pdf" % stub
+            xdownplay,warnings = self.extract_xml()
+            text = self.paginate(xdownplay)
+            pdf = canvas.Canvas(new_filename,pagesize=pagesizes.letter)
+            font_set = False
+            line_number = 0
+            for line in text.split("\n"):
+                if line != "":
+                    if not font_set:
+                        pdf.setFont("Courier",12)
+                        font_set = True
+                    pdf.drawString(1.7*units.inch,10.5*units.inch-line_number*12,line)
+                line_number += 1
+                if line_number >= 60:
+                    line_number = 0
+                    pdf.showPage()
+                    font_set = False
+            pdf.save()
+
 
     def print_to_console(self):
         print("-"*79)
@@ -455,7 +590,7 @@ class ScriptEdit(QtGui.QTextEdit):
     def get_status_line(self):
         return "%s%s        %s" % (
             (os.path.basename(self.current_filename)
-             if self.current_filename is not None else "Untitled"), 
+             if self.current_filename is not None else "Untitled"),
             ("*" if self.document().isModified() else ""),
             self.get_margin_type())
 
@@ -560,15 +695,15 @@ def populate_menu(menu,menu_def):
             menu.addSeparator()
         else:
             def_error()
-            
-    
+
+
 def main():
     ap = argparse.ArgumentParser(description='Invoke Downplay')
     ap.add_argument("filename",default=None,nargs='?',help='File to open')
     args = ap.parse_args()
 
     app = QtGui.QApplication([])
-    
+
     script_edit = ScriptEdit()
     if args.filename is not None:
         script_edit.open_filename(args.filename)
@@ -590,6 +725,8 @@ def main():
             script_edit.save_a_copy_action,
             "-",
             script_edit.export_as_text_action,
+            script_edit.export_as_pages_action,
+            script_edit.export_as_pdf_action,
             script_edit.print_to_console_action,
             "-",
             ( "&Quit", Qt.Key_F4 | Qt.ALT, sys.exit ),
@@ -603,7 +740,7 @@ def main():
             script_edit.copy_action,
             script_edit.paste_action,
             "-",
-            ( "&Find and Replace...", Qt.Key_F | Qt.CTRL, 
+            ( "&Find and Replace...", Qt.Key_F | Qt.CTRL,
               search_dialog.activate ),
             ),
         ),
@@ -629,13 +766,13 @@ def main():
     status_bar = win.statusBar()
     status_bar.showMessage(script_edit.get_status_line())
     script_edit.statusChanged.connect(status_bar.showMessage)
-    
+
     win.addDockWidget(Qt.BottomDockWidgetArea,search_dialog)
     search_dialog.hide()
 
-    win.resize(620,700) 
+    win.resize(620,700)
     win.show()
-    
+
     app.exec_()
 
 
