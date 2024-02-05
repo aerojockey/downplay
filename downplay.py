@@ -55,7 +55,7 @@ def format_paragraph(text,indent,width):
         lines.append(" "*indent + " ".join(line))
     return lines
 
-def format(xdownplay):
+def format_screenplay(xdownplay):
     text = []
     for xp in xdownplay.findall('p'):
         if xp.text in (None,""):
@@ -65,7 +65,7 @@ def format(xdownplay):
         if style == "ACTION":
             text.extend(format_paragraph(xp.text,0,60))
         elif style == "DIALOGUE":
-            text.extend(format_paragraph(xp.text,10,30))
+            text.extend(format_paragraph(xp.text,10,36))
         elif style == "NAME":
             text.extend(format_paragraph(xp.text,20,20))
         elif style == "PARENTHETICAL":
@@ -77,7 +77,7 @@ def format(xdownplay):
     text.append("")
     return "\n".join(text)
 
-def paginate(xdownplay):
+def paginate_screenplay(xdownplay):
     def page_break():
         nonlocal line_number, page_number, eat_space
         while line_number < 60:
@@ -132,7 +132,7 @@ def paginate(xdownplay):
             add_clump()
             add_lines(format_paragraph(xp.text,0,60))
         elif style == "DIALOGUE":
-            paragraph = format_paragraph(xp.text,10,30)
+            paragraph = format_paragraph(xp.text,10,36)
             add_clump(max(2,len(paragraph)))
             while line_number + len(paragraph) > 56:
                 n_balance = 55-line_number
@@ -153,16 +153,16 @@ def paginate(xdownplay):
     page_break()
     return "\n".join(text)
 
-def export_as_text(xdownplay,txt_filename,*,paginated=True):
+def save_screenplay_as_text(xdownplay,txt_filename,*,paginated=True):
     if paginated:
-        text = paginate(xdownplay)
+        text = paginate_screenplay(xdownplay)
     else:
-        text = format(xdownplay)
+        text = format_screenplay(xdownplay)
     with open(txt_filename,"w",encoding='utf-8') as flo:
         flo.write(text)
 
-def export_as_pdf(xdownplay,pdf_filename):
-    text = paginate(xdownplay)
+def save_screenplay_as_pdf(xdownplay,pdf_filename):
+    text = paginate_screenplay(xdownplay)
     pdf = canvas.Canvas(pdf_filename,pagesize=pagesizes.letter)
     font_set = False
     line_number = 0
@@ -178,14 +178,6 @@ def export_as_pdf(xdownplay,pdf_filename):
             pdf.showPage()
             font_set = False
     pdf.save()
-
-
-
-
-
-
-
-
 
 
 class ScriptEdit(QtWidgets.QTextEdit):
@@ -347,7 +339,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
             self.set_margin_type('ACTION')
 
     def find_in_document(self,find_text,flags=QtGui.QTextDocument.FindFlag()):
-        status = self.find(find_text,flags)
+        status = self.find(find_text,QtGui.QTextDocument.FindFlag(flags))
         if status:
             self.setFocus()
         else:
@@ -579,7 +571,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
                 if ext == "":
                     new_filename = "%s.txt" % stub
             xdownplay,warnings = self.extract_xml()
-            export_as_text(xdownplay,new_filename,paginated=paginated)
+            save_screenplay_as_text(xdownplay,new_filename,paginated=paginated)
 
     def export_as_pdf(self):
         if self.last_dirname is not None:
@@ -600,18 +592,18 @@ class ScriptEdit(QtWidgets.QTextEdit):
                 if ext == "":
                     new_filename = "%s.pdf" % stub
             xdownplay,warnings = self.extract_xml()
-            export_as_pdf(xdownplay,new_filename)
+            save_screenplay_as_pdf(xdownplay,new_filename)
 
     def print_to_console(self):
         print("-"*79)
         xdownplay,warnings = self.extract_xml()
-        print(self.format(xdownplay))
+        print(format_screenplay(xdownplay))
         print("-"*79)
 
     def estimate_pages(self):
         lines_per_page = 52
         xdownplay,warnings = self.extract_xml()
-        text = self.format(xdownplay)
+        text = format_screenplay(xdownplay)
         n_lines = text.count("\n")
         n_pages = n_lines / 52
         QtWidgets.QMessageBox.information(
@@ -851,9 +843,9 @@ def convert(downplay_filenames,output_filename):
     if output_filename.endswith('.pdf'):
         if not HAS_REPORTLAB:
             raise RuntimeError("can't import reportlab")
-        export_as_pdf(xdownplay,output_filename)
+        save_screenplay_as_pdf(xdownplay,output_filename)
     elif output_filename.endswith('.txt'):
-        export_as_text(xdownplay,output_filename)
+        save_screenplay_as_text(xdownplay,output_filename)
     else:
         raise RuntimeError('out filenames must all be text or PDF')
 
