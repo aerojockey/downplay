@@ -1,4 +1,7 @@
-#! /usr/lib/python3
+#! /usr/bin/python3
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import sys
 import os
@@ -7,8 +10,8 @@ import traceback
 import argparse
 import xml.etree.ElementTree as ET
 
-from PySide import QtCore, QtGui
-from PySide.QtCore import Qt
+from PySide2 import QtCore, QtGui, QtWidgets
+from PySide2.QtCore import Qt
 
 try:
     from reportlab.pdfgen import canvas
@@ -18,7 +21,7 @@ except ImportError:
     HAS_REPORTLAB = False
 
 
-class ScriptEdit(QtGui.QTextEdit):
+class ScriptEdit(QtWidgets.QTextEdit):
 
     MARGINS = {
         'ACTION': (0,0),
@@ -40,7 +43,7 @@ class ScriptEdit(QtGui.QTextEdit):
         self.changed_timer.setSingleShot(True)
         self.changed_timer.timeout.connect(self.emit_status_change)
 
-        self.setLineWrapMode(QtGui.QTextEdit.FixedPixelWidth)
+        self.setLineWrapMode(QtWidgets.QTextEdit.FixedPixelWidth)
         self.setLineWrapColumnOrWidth(600)
 
         self.setAcceptRichText(False)
@@ -98,12 +101,13 @@ class ScriptEdit(QtGui.QTextEdit):
         self.estimate_pages_action = self.create_action(
             "Estimate number of &Pages", None, self.estimate_pages)
 
-        font = QtGui.QFont("Courier New",12,QtGui.QFont.Normal,False)
+        font = QtGui.QFont('Courier',12,QtGui.QFont.Normal,False)
+
         self.document().setDefaultFont(font)
 
         text_option = QtGui.QTextOption()
         text_option.setAlignment(Qt.AlignLeft)
-        text_option.setFlags(0)
+        text_option.setFlags(QtGui.QTextOption.Flags()) # 0
         text_option.setTabArray([])
         text_option.setTextDirection(Qt.LeftToRight)
         text_option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
@@ -143,7 +147,7 @@ class ScriptEdit(QtGui.QTextEdit):
                                   QtCore.SLOT("start()"))
 
     def create_action(self,label,shortcut=None,function=None,enabled=True):
-        action = QtGui.QAction(label,self)
+        action = QtWidgets.QAction(label,self)
         action.setEnabled(enabled)
         if shortcut is not None:
             action.setShortcut(shortcut)
@@ -180,7 +184,7 @@ class ScriptEdit(QtGui.QTextEdit):
         if status:
             self.setFocus()
         else:
-            QtGui.QMessageBox.information(
+            QtWidgets.QMessageBox.information(
                 self,"Search term not found",
                 "No more instances of the search term %r "
                 "found in document" % find_text)
@@ -188,7 +192,7 @@ class ScriptEdit(QtGui.QTextEdit):
     def replace_in_document(self,find_text,replace_text,flags=0):
         cursor = self.textCursor()
         selected_text = cursor.selectedText()
-        if flags & QtGui.QTextDocument.FindCaseSensitively:
+        if flags & QtWidgets.QTextDocument.FindCaseSensitively:
             lhs = find_text
             rhs = selected_text
         else:
@@ -201,11 +205,11 @@ class ScriptEdit(QtGui.QTextEdit):
     def ok_to_discard(self):
         if not self.document().isModified():
             return True
-        answer = QtGui.QMessageBox.warning(
+        answer = QtWidgets.QMessageBox.warning(
             self,"Discard current document?",
             "The current document contains unsaved changes.",
-            QtGui.QMessageBox.Discard | QtGui.QMessageBox.Cancel)
-        return answer == QtGui.QMessageBox.Discard
+            QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel)
+        return answer == QtWidgets.QMessageBox.Discard
 
     def new(self):
         if not self.ok_to_discard():
@@ -222,7 +226,7 @@ class ScriptEdit(QtGui.QTextEdit):
             start_dirname = self.last_dirname
         else:
             start_dirname = os.getcwd()
-        new_filename,filter = QtGui.QFileDialog.getOpenFileName(
+        new_filename,filter = QtWidgets.QFileDialog.getOpenFileName(
             self,"Open Downplay file...",start_dirname,
             "Downplay files (*.dply);;All files (*)")
         if new_filename != "":
@@ -235,17 +239,17 @@ class ScriptEdit(QtGui.QTextEdit):
             with open(filename,"rb") as flo:
                 doc = ET.parse(flo)
         except ET.ParseError:
-            QtGui.QMessageBox.warning(
+            QtWidgets.QMessageBox.warning(
                 self,"Invalid XML",
                 "The file %s contained invalid XML" % basename)
             return
         except Exception as exc:
             if isinstance(exc,IOError) and exc.errno == 2:
-                QtGui.QMessageBox.warning(
+                QtWidgets.QMessageBox.warning(
                     self,"File not found",
                     "File %s not found" % basename)
             else:
-                QtGui.QMessageBox.warning(
+                QtWidgets.QMessageBox.warning(
                     self,"File error",
                     "Error reading file %s; runtime returned the "
                     "following error message:\n%s"
@@ -254,13 +258,13 @@ class ScriptEdit(QtGui.QTextEdit):
         xdownplay = doc.getroot()
         if xdownplay.tag != "downplay" \
            or xdownplay.attrib.get("format") is None:
-            QtGui.QMessageBox.warning(
+            QtWidgets.QMessageBox.warning(
                 self,"File format error",
                 "File %s not a Downplay file" % basename)
             return
         format = xdownplay.attrib["format"]
         if format != "1.0":
-            QtGui.QMessageBox.warning(
+            QtWidgets.QMessageBox.warning(
                 self,"File format error",
                 "File %s has unsupported Downplay format %s"
                 % (basename, format))
@@ -268,7 +272,7 @@ class ScriptEdit(QtGui.QTextEdit):
         for xp in xdownplay:
             if xp.tag != "p" or len(xp) != 0 \
                or xp.attrib.get("style","ACTION") not in self.MARGINS:
-                QtGui.QMessageBox.warning(
+                QtWidgets.QMessageBox.warning(
                     self,"File format error",
                     "File %s has unsupported Downplay has invalid elements"
                     % (basename, format))
@@ -325,7 +329,7 @@ class ScriptEdit(QtGui.QTextEdit):
             start_dirname = self.last_dirname
         else:
             start_dirname = os.getcwd()
-        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+        new_filename,filter = QtWidgets.QFileDialog.getSaveFileName(
             self,"Save buffer as Downplay file...",start_dirname,
             "Downplay files (*.dply);;All files (*)")
         if new_filename != "":
@@ -341,7 +345,7 @@ class ScriptEdit(QtGui.QTextEdit):
             start_dirname = self.last_dirname
         else:
             start_dirname = os.getcwd()
-        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+        new_filename,filter = QtWidgets.QFileDialog.getSaveFileName(
             self,"Save copy of buffer as Downplay file...",start_dirname,
             "Downplay files (*.dply);;All files (*)")
         if filter == "Downplay files (*.dply)":
@@ -357,17 +361,17 @@ class ScriptEdit(QtGui.QTextEdit):
             message = [ "The following potential problems were encountered:" ]
             message.extend(sorted(warnings))
             message.append("Save anyway?")
-            response = QtGui.QMessageBox.warning(
+            response = QtWidgets.QMessageBox.warning(
                 self,"Problem with document","\n".join(message),
-                QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
-            if response == QtGui.QMessageBox.No:
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            if response == QtWidgets.QMessageBox.No:
                 return
         filename = os.path.normpath(os.path.abspath(filename))
         try:
             with open(filename,"wb") as flo:
                 ET.ElementTree(xdownplay).write(flo,"utf-8",True)
         except Exception:
-            QtGui.QMessageBox.warning(
+            QtWidgets.QMessageBox.warning(
                 self,"File error",
                 "Error writing file %s; runtime returned the "
                 "following error message:\n%s"
@@ -495,7 +499,7 @@ class ScriptEdit(QtGui.QTextEdit):
                 add_clump(max(2,len(paragraph)))
                 while line_number + len(paragraph) > 56:
                     n_balance = 55-line_number
-                    balance,paragraph = paragraph[:n_balance],paragraph[n_balance,:]
+                    balance,paragraph = paragraph[:n_balance],paragraph[n_balance:]
                     add_lines(balance)
                     add_lines("%*s(MORE)" % (20,""))
                 add_lines(paragraph)
@@ -532,7 +536,7 @@ class ScriptEdit(QtGui.QTextEdit):
             how = "paginated"
         else:
             how = "continuous"
-        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+        new_filename,filter = QtWidgets.QFileDialog.getSaveFileName(
             self,"Export buffer as %s text file..." % how,start_pathname,
             "Text files (*.txt);;All files (*)")
         if new_filename != "":
@@ -558,7 +562,7 @@ class ScriptEdit(QtGui.QTextEdit):
             start_pathname = os.path.join(start_dirname,stub+".pdf")
         else:
             start_pathname = start_dirname
-        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+        new_filename,filter = QtWidgets.QFileDialog.getSaveFileName(
             self,"Export buffer as PDF file...",start_pathname,
             "PDF files (*.pdf);;All files (*)")
         if new_filename != "":
@@ -597,7 +601,7 @@ class ScriptEdit(QtGui.QTextEdit):
         text = self.format(xdownplay)
         n_lines = text.count("\n")
         n_pages = n_lines / 52
-        QtGui.QMessageBox.information(
+        QtWidgets.QMessageBox.information(
             self,"Page count estimate",
             "Page count estimated at %g, based on %g lines per page."
             % (n_pages, lines_per_page))
@@ -613,7 +617,39 @@ class ScriptEdit(QtGui.QTextEdit):
             self.get_margin_type())
 
 
-class SearchDialog(QtGui.QDockWidget):
+    _keepalive = []
+
+    def createMimeDataFromSelection(self):
+        cursor = self.textCursor()
+        text = cursor.selectedText().replace('\u2029','\n')
+        downplay_data = cursor.selection().toHtml().encode('utf-8')
+        mime_data = QtCore.QMimeData()
+        mime_data.setText(text)
+        mime_data.setData('application/x-downplay',downplay_data)
+
+        # Workaround: ownership passes to caller, so must do this to
+        # prevent python from garbage collecting it.  Causes segfault on
+        # exit.  Was fixed in later PySide so don't worry too much.
+        self._keepalive.append(mime_data)
+
+        return mime_data
+
+    def canInsertFromMimeData(self,mime_data):
+        return mime_data.hasFormat('application/x-downplay') or mime_data.hasFormat('text/plain')
+
+    def insertFromMimeData(self,mime_data):
+        if mime_data.hasFormat('application/x-downplay'):
+            downplay_data = str(mime_data.data('application/x-downplay'),'utf-8')
+            cursor = self.textCursor()
+            cursor.insertHtml(downplay_data)
+        elif mime_data.hasFormat('text/plain'):
+            text = mime_data.text().replace('\n','\u2029')
+            cursor = self.textCursor()
+            cursor.insertText(text)
+
+
+
+class SearchDialog(QtWidgets.QDockWidget):
 
     findRequested = QtCore.Signal(str,int)
     replaceRequested = QtCore.Signal(str,str,int)
@@ -621,39 +657,39 @@ class SearchDialog(QtGui.QDockWidget):
     def __init__(self,parent=None):
         super().__init__(parent)
 
-        self.setFeatures(QtGui.QDockWidget.DockWidgetClosable
-                         | QtGui.QDockWidget.DockWidgetMovable
-                         | QtGui.QDockWidget.DockWidgetFloatable)
+        self.setFeatures(QtWidgets.QDockWidget.DockWidgetClosable
+                         | QtWidgets.QDockWidget.DockWidgetMovable
+                         | QtWidgets.QDockWidget.DockWidgetFloatable)
 
         self.setAllowedAreas(Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
 
         self.setFloating(True)
 
-        base = QtGui.QWidget()
+        base = QtWidgets.QWidget()
         self.setWidget(base)
 
-        layout = QtGui.QGridLayout()
+        layout = QtWidgets.QGridLayout()
         base.setLayout(layout)
 
-        self.find_entry = QtGui.QLineEdit()
+        self.find_entry = QtWidgets.QLineEdit()
         layout.addWidget(self.find_entry,0,0,Qt.AlignLeft)
 
-        self.replace_entry = QtGui.QLineEdit()
+        self.replace_entry = QtWidgets.QLineEdit()
         layout.addWidget(self.replace_entry,1,0,Qt.AlignLeft)
 
-        self.find_button = QtGui.QPushButton("Find")
+        self.find_button = QtWidgets.QPushButton("Find")
         layout.addWidget(self.find_button,0,1,Qt.AlignRight)
 
-        self.replace_button = QtGui.QPushButton("Replace")
+        self.replace_button = QtWidgets.QPushButton("Replace")
         layout.addWidget(self.replace_button,1,1,Qt.AlignRight)
 
-        self.backward_checkbox = QtGui.QCheckBox("Search backwards")
+        self.backward_checkbox = QtWidgets.QCheckBox("Search backwards")
         layout.addWidget(self.backward_checkbox,0,2,Qt.AlignLeft)
 
-        self.case_checkbox = QtGui.QCheckBox("Case sensitive")
+        self.case_checkbox = QtWidgets.QCheckBox("Case sensitive")
         layout.addWidget(self.case_checkbox,0,3,Qt.AlignLeft)
 
-        self.whole_checkbox = QtGui.QCheckBox("Whole words only")
+        self.whole_checkbox = QtWidgets.QCheckBox("Whole words only")
         layout.addWidget(self.whole_checkbox,0,4,Qt.AlignLeft)
 
         self.find_button.clicked.connect(self.find)
@@ -662,11 +698,11 @@ class SearchDialog(QtGui.QDockWidget):
     def flags(self):
         flags = 0
         if self.backward_checkbox.isChecked():
-            flags |= QtGui.QTextDocument.FindBackward
+            flags |= QtWidgets.QTextDocument.FindBackward
         if self.case_checkbox.isChecked():
-            flags |= QtGui.QTextDocument.FindCaseSensitively
+            flags |= QtWidgets.QTextDocument.FindCaseSensitively
         if self.whole_checkbox.isChecked():
-            flags |= QtGui.QTextDocument.FindWholeWords
+            flags |= QtWidgets.QTextDocument.FindWholeWords
         return flags
 
     def find(self):
@@ -693,7 +729,7 @@ def populate_menu(menu,menu_def):
     def def_error():
         raise ValueError("invalid menu item definition %r" % (menu_item_def,))
     for menu_item_def in menu_def:
-        if isinstance(menu_item_def,QtGui.QAction):
+        if isinstance(menu_item_def,QtWidgets.QAction):
             menu.addAction(menu_item_def)
         elif isinstance(menu_item_def,tuple):
             name,shortcut,data = menu_item_def
@@ -720,7 +756,7 @@ def main():
     ap.add_argument("filename",default=None,nargs='?',help='File to open')
     args = ap.parse_args()
 
-    app = QtGui.QApplication([])
+    app = QtWidgets.QApplication([])
 
     script_edit = ScriptEdit()
     if args.filename is not None:
@@ -730,7 +766,7 @@ def main():
     search_dialog.findRequested.connect(script_edit.find_in_document)
     search_dialog.replaceRequested.connect(script_edit.replace_in_document)
 
-    win = QtGui.QMainWindow()
+    win = QtWidgets.QMainWindow()
 
     win.setCentralWidget(script_edit)
 
