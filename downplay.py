@@ -2,6 +2,7 @@
 
 import sys
 import os
+import re
 import traceback
 import argparse
 import xml.etree.ElementTree as ET
@@ -47,6 +48,14 @@ class ScriptEdit(QtGui.QTextEdit):
             "Save &As...", None, self.save_as)
         self.save_a_copy_action = self.create_action(
             "Save a &Copy...", None, self.save_a_copy)
+        self.export_as_text_action = self.create_action(
+            "Export as continuous text...", None, self.export_as_text)
+        #self.export_as_pages_action = self.create_action(
+        #    "Export as paginated text...", None, self.export_as_pages)
+        #self.export_as_pdf_action = self.create_action(
+        #    "Export as PDF...", None, self.export_as_pdf)
+        self.print_to_console_action = self.create_action(
+            "Print to console", None, self.print_to_console)
         
         self.undo_action = self.create_action(
             "&Undo", Qt.Key_Z | Qt.CTRL, self.undo)
@@ -77,6 +86,9 @@ class ScriptEdit(QtGui.QTextEdit):
         self.cycle_styles_action = self.create_action(
             "Cycle &Styles", Qt.Key_Tab | Qt.NoModifier,
             self.cycle_margin)
+
+        self.estimate_pages_action = self.create_action(
+            "Estimate number of &Pages", None, self.estimate_pages)
 
         font = QtGui.QFont("Courier New",12,QtGui.QFont.Normal,False)
         self.document().setDefaultFont(font)
@@ -273,6 +285,26 @@ class ScriptEdit(QtGui.QTextEdit):
         self.document().setModified(False)
         self.changed_timer.start()
         
+    def extract_xml(self):
+        xdownplay = ET.Element("downplay")
+        xdownplay.attrib["format"] = "1.0"
+        xdownplay.text = "\n  "
+        warnings = set()
+        for tfi in self.document().rootFrame():
+            text_block = tfi.currentBlock()
+            if not text_block.isValid():
+                warnings.add("Unexpectedly encountered a frame "
+                             "in the document; skipping")
+            else:
+                block_format = text_block.blockFormat()
+                left_margin = block_format.leftMargin()
+                margin_type = self.REV_MARGINS.get(left_margin,'ACTION')
+                xp = ET.SubElement(xdownplay,"p",style=margin_type)
+                xp.text = text_block.text()
+            xp.tail = "\n  "
+        xp.tail = "\n"
+        return xdownplay, warnings
+
     def save(self):
         if self.current_filename is not None:
             self.save_to_filename(self.current_filename)
@@ -287,11 +319,11 @@ class ScriptEdit(QtGui.QTextEdit):
         new_filename,filter = QtGui.QFileDialog.getSaveFileName(
             self,"Save buffer as Downplay file...",start_dirname,
             "Downplay files (*.dply);;All files (*)")
-        if filter == "Downplay files (*.dply)":
-            stub,ext = os.path.splitext(new_filename)
-            if ext == "":
-                new_filename = "%s.dply" % stub
         if new_filename != "":
+            if filter == "Downplay files (*.dply)":
+                stub,ext = os.path.splitext(new_filename)
+                if ext == "":
+                    new_filename = "%s.dply" % stub
             self.save_to_filename(new_filename)
             self.document().setModified(False)
 
@@ -311,24 +343,7 @@ class ScriptEdit(QtGui.QTextEdit):
             self.save_to_filename(new_filename,is_copy=True)
 
     def save_to_filename(self,filename,is_copy=False):
-        filename = os.path.normpath(os.path.abspath(filename))
-        xdownplay = ET.Element("downplay")
-        xdownplay.attrib["format"] = "1.0"
-        xdownplay.text = "\n  "
-        warnings = set()
-        for tfi in self.document().rootFrame():
-            text_block = tfi.currentBlock()
-            if not text_block.isValid():
-                warnings.add("Unexpectedly encountered a frame "
-                             "in the document; skipping")
-            else:
-                block_format = text_block.blockFormat()
-                left_margin = block_format.leftMargin()
-                margin_type = self.REV_MARGINS.get(left_margin,'ACTION')
-                xp = ET.SubElement(xdownplay,"p",style=margin_type)
-                xp.text = text_block.text()
-            xp.tail = "\n  "
-        xp.tail = "\n"
+        xdownplay, warnings = self.extract_xml()
         if warnings:
             message = [ "The following potential problems were encountered:" ]
             message.extend(sorted(warnings))
@@ -338,6 +353,7 @@ class ScriptEdit(QtGui.QTextEdit):
                 QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
             if response == QtGui.QMessageBox.No:
                 return
+        filename = os.path.normpath(os.path.abspath(filename))
         try:
             with open(filename,"wb") as flo:
                 ET.ElementTree(xdownplay).write(flo,"utf-8",True)
@@ -353,6 +369,85 @@ class ScriptEdit(QtGui.QTextEdit):
             self.last_dirname = os.path.dirname(filename)
             self.document().setModified(False)
             self.changed_timer.start()
+
+    @staticmethod
+    def format_paragraph(text,indent,width):
+        lines = []
+        line = []
+        c = 0
+        for m in re.finditer(r'[^\s-]+-?\s*',text):
+            word = m.group(0)
+            if c != 0 and c + len(word.rstrip()) >= width:
+                lines.append(" "*indent + "".join(line).rstrip())
+                line = []
+                c = 0
+            line.append(word)
+            c += len(word)
+        if len(line) != 0:
+            lines.append(" "*indent + "".join(line).rstrip())
+        return lines
+
+    def format(self,xdownplay):
+        text = []
+        for xp in xdownplay.findall('p'):
+            if xp.text in (None,""):
+                text.append("")
+                continue
+            style = xp.attrib["style"]
+            if style == "ACTION":
+                text.extend(self.format_paragraph(xp.text,0,60))
+            elif style == "DIALOGUE":
+                text.extend(self.format_paragraph(xp.text,10,35))
+            elif style == "NAME":
+                text.extend(self.format_paragraph(xp.text,20,25))
+            elif style == "PARENTHETICAL":
+                text.extend(self.format_paragraph(xp.text,15,30))
+            elif style == "TRANSITION":
+                text.extend(self.format_paragraph(xp.text,45,15))
+            else:
+                assert False
+        text.append("")
+        return "\n".join(text)
+
+    def export_as_text(self):
+        if self.last_dirname is not None:
+            start_dirname = self.last_dirname
+        else:
+            start_dirname = os.getcwd()
+        if self.current_filename is not None:
+            stub,ext = os.path.splitext(self.current_filename)
+            start_pathname = os.path.join(start_dirname,stub+".txt")
+        else:
+            start_pathname = start_dirname
+        new_filename,filter = QtGui.QFileDialog.getSaveFileName(
+            self,"Export buffer as continuous text file...",start_pathname,
+            "Text files (*.txt);;All files (*)")
+        if new_filename != "":
+            if filter == "Text files (*.txt)":
+                stub,ext = os.path.splitext(new_filename)
+                if ext == "":
+                    new_filename = "%s.txt" % stub
+                xdownplay,warnings = self.extract_xml()
+                text = self.format(xdownplay)
+                with open(new_filename,"w",encoding='utf-8') as flo:
+                    flo.write(text)
+
+    def print_to_console(self):
+        print("-"*79)
+        xdownplay,warnings = self.extract_xml()
+        print(self.format(xdownplay))
+        print("-"*79)
+
+    def estimate_pages(self):
+        lines_per_page = 52
+        xdownplay,warnings = self.extract_xml()
+        text = self.format(xdownplay)
+        n_lines = text.count("\n")
+        n_pages = n_lines / 52
+        QtGui.QMessageBox.information(
+            self,"Page count estimate",
+            "Page count estimated at %g, based on %g lines per page."
+            % (n_pages, lines_per_page))
 
     def emit_status_change(self):
         self.statusChanged.emit(self.get_status_line())
@@ -494,8 +589,9 @@ def main():
             script_edit.save_as_action,
             script_edit.save_a_copy_action,
             "-",
-            #( "&Export...", None ),
-            #"-",
+            script_edit.export_as_text_action,
+            script_edit.print_to_console_action,
+            "-",
             ( "&Quit", Qt.Key_F4 | Qt.ALT, sys.exit ),
             ),
         ),
@@ -519,6 +615,10 @@ def main():
             script_edit.parenthetical_style_action,
             script_edit.name_style_action,
             script_edit.transition_style_action,
+            ),
+        ),
+        ( '&Info', None, (
+            script_edit.estimate_pages_action,
             ),
         ),
         ]
