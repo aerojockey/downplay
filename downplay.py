@@ -384,16 +384,33 @@ class ScriptEdit(QtGui.QTextEdit):
         lines = []
         line = []
         c = 0
-        for m in re.finditer(r'[^\s-]+-?\s*',text):
-            word = m.group(0)
-            if c != 0 and c + len(word.rstrip()) >= width:
-                lines.append(" "*indent + "".join(line).rstrip())
-                line = []
-                c = 0
+        for word in text.split():
+            if c + len(line) + len(word) > width:
+
+                b = len(word)
+                while True:
+                    i = word.rfind('-',0,b)
+                    if i == -1:
+                        break
+                    if c + len(line) + i + 1 <= width:
+                        line.append(word[:i+1])
+                        lines.append(" "*indent + " ".join(line))
+                        line = []
+                        c = 0
+                        word = word[i+1:]
+                        b = len(word)
+                        if b <= width:
+                            break
+                    else:
+                        b = i
+                if c != 0:
+                    lines.append(" "*indent + " ".join(line))
+                    line = []
+                    c = 0
             line.append(word)
             c += len(word)
         if len(line) != 0:
-            lines.append(" "*indent + "".join(line).rstrip())
+            lines.append(" "*indent + " ".join(line))
         return lines
 
     def format(self,xdownplay):
@@ -406,15 +423,16 @@ class ScriptEdit(QtGui.QTextEdit):
             if style == "ACTION":
                 text.extend(self.format_paragraph(xp.text,0,60))
             elif style == "DIALOGUE":
-                text.extend(self.format_paragraph(xp.text,10,35))
+                text.extend(self.format_paragraph(xp.text,10,30))
             elif style == "NAME":
-                text.extend(self.format_paragraph(xp.text,20,25))
+                text.extend(self.format_paragraph(xp.text,20,20))
             elif style == "PARENTHETICAL":
-                text.extend(self.format_paragraph(xp.text,15,30))
+                text.extend(self.format_paragraph(xp.text,15,25))
             elif style == "TRANSITION":
                 text.extend(self.format_paragraph(xp.text,45,15))
             else:
                 assert False
+
         text.append("")
         return "\n".join(text)
 
@@ -473,7 +491,7 @@ class ScriptEdit(QtGui.QTextEdit):
                 add_clump()
                 add_lines(self.format_paragraph(xp.text,0,60))
             elif style == "DIALOGUE":
-                paragraph = self.format_paragraph(xp.text,10,35)
+                paragraph = self.format_paragraph(xp.text,10,30)
                 add_clump(max(2,len(paragraph)))
                 while line_number + len(paragraph) > 56:
                     n_balance = 55-line_number
@@ -482,9 +500,9 @@ class ScriptEdit(QtGui.QTextEdit):
                     add_lines("%*s(MORE)" % (20,""))
                 add_lines(paragraph)
             elif style == "NAME":
-                clump.extend(self.format_paragraph(xp.text,20,25))
+                clump.extend(self.format_paragraph(xp.text,20,20))
             elif style == "PARENTHETICAL":
-                clump.extend(self.format_paragraph(xp.text,10,35))
+                clump.extend(self.format_paragraph(xp.text,15,25))
             elif style == "TRANSITION":
                 add_clump()
                 add_lines(self.format_paragraph(xp.text,45,15))
