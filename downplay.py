@@ -21,6 +21,173 @@ except ImportError:
     HAS_REPORTLAB = False
 
 
+
+def format_paragraph(text,indent,width):
+    lines = []
+    line = []
+    c = 0
+    for word in text.split():
+        if c + len(line) + len(word) > width:
+
+            b = len(word)
+            while True:
+                i = word.rfind('-',0,b)
+                if i == -1:
+                    break
+                if c + len(line) + i + 1 <= width:
+                    line.append(word[:i+1])
+                    lines.append(" "*indent + " ".join(line))
+                    line = []
+                    c = 0
+                    word = word[i+1:]
+                    b = len(word)
+                    if b <= width:
+                        break
+                else:
+                    b = i
+            if c != 0:
+                lines.append(" "*indent + " ".join(line))
+                line = []
+                c = 0
+        line.append(word)
+        c += len(word)
+    if len(line) != 0:
+        lines.append(" "*indent + " ".join(line))
+    return lines
+
+def format(xdownplay):
+    text = []
+    for xp in xdownplay.findall('p'):
+        if xp.text in (None,""):
+            text.append("")
+            continue
+        style = xp.attrib["style"]
+        if style == "ACTION":
+            text.extend(format_paragraph(xp.text,0,60))
+        elif style == "DIALOGUE":
+            text.extend(format_paragraph(xp.text,10,30))
+        elif style == "NAME":
+            text.extend(format_paragraph(xp.text,20,20))
+        elif style == "PARENTHETICAL":
+            text.extend(format_paragraph(xp.text,15,25))
+        elif style == "TRANSITION":
+            text.extend(format_paragraph(xp.text,45,15))
+        else:
+            assert False
+    text.append("")
+    return "\n".join(text)
+
+def paginate(xdownplay):
+    def page_break():
+        nonlocal line_number, page_number, eat_space
+        while line_number < 60:
+            text.append("")
+            line_number += 1
+        line_number = 0
+        page_number += 1
+        eat_space = True
+    def add_line(line):
+        nonlocal line_number, page_number, eat_space
+        if eat_space and line in (None,""):
+            eat_space = False
+            return
+        while line_number < 4:
+            if line_number == 2 and page_number > 1:
+                text.append("%*s%d." % (55,"",page_number))
+            else:
+                text.append("")
+            line_number += 1
+        text.append(line)
+        line_number += 1
+        if line_number >= 56:
+            page_break()
+        else:
+            eat_space = False
+    def add_lines(lines):
+        for line in lines:
+            add_line(line)
+    def add_clump(reserve=0):
+        if len(clump) == 0:
+            return
+        if len(clump) > 10:  # don't even try
+            add_lines(clump)
+            clump.clear()
+            return
+        if line_number + len(clump) + reserve > 56:
+            page_break()
+        add_lines(clump)
+        clump.clear()
+    text = []
+    line_number = 0
+    page_number = 1
+    eat_space = False
+    clump = []
+    for xp in xdownplay.findall('p'):
+        if xp.text in (None,""):
+            add_clump()
+            add_line("")
+            continue
+        style = xp.attrib["style"]
+        if style == "ACTION":
+            add_clump()
+            add_lines(format_paragraph(xp.text,0,60))
+        elif style == "DIALOGUE":
+            paragraph = format_paragraph(xp.text,10,30)
+            add_clump(max(2,len(paragraph)))
+            while line_number + len(paragraph) > 56:
+                n_balance = 55-line_number
+                balance,paragraph = paragraph[:n_balance],paragraph[n_balance:]
+                add_lines(balance)
+                add_lines(("%*s(MORE)" % (20,""),))
+            add_lines(paragraph)
+        elif style == "NAME":
+            clump.extend(format_paragraph(xp.text,20,20))
+        elif style == "PARENTHETICAL":
+            clump.extend(format_paragraph(xp.text,15,25))
+        elif style == "TRANSITION":
+            add_clump()
+            add_lines(format_paragraph(xp.text,45,15))
+        else:
+            assert False
+    add_clump()
+    page_break()
+    return "\n".join(text)
+
+def export_as_text(xdownplay,txt_filename,*,paginated=True):
+    if paginated:
+        text = paginate(xdownplay)
+    else:
+        text = format(xdownplay)
+    with open(txt_filename,"w",encoding='utf-8') as flo:
+        flo.write(text)
+
+def export_as_pdf(xdownplay,pdf_filename):
+    text = paginate(xdownplay)
+    pdf = canvas.Canvas(pdf_filename,pagesize=pagesizes.letter)
+    font_set = False
+    line_number = 0
+    for line in text.split("\n"):
+        if line != "":
+            if not font_set:
+                pdf.setFont("Courier",12)
+                font_set = True
+            pdf.drawString(1.7*units.inch,10.5*units.inch-line_number*12,line)
+        line_number += 1
+        if line_number >= 60:
+            line_number = 0
+            pdf.showPage()
+            font_set = False
+    pdf.save()
+
+
+
+
+
+
+
+
+
+
 class ScriptEdit(QtWidgets.QTextEdit):
 
     MARGINS = {
@@ -179,7 +346,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
         else:
             self.set_margin_type('ACTION')
 
-    def find_in_document(self,find_text,flags=0):
+    def find_in_document(self,find_text,flags=QtGui.QTextDocument.FindFlag()):
         status = self.find(find_text,flags)
         if status:
             self.setFocus()
@@ -189,7 +356,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
                 "No more instances of the search term %r "
                 "found in document" % find_text)
 
-    def replace_in_document(self,find_text,replace_text,flags=0):
+    def replace_in_document(self,find_text,replace_text,flags=QtGui.QTextDocument.FindFlag()):
         cursor = self.textCursor()
         selected_text = cursor.selectedText()
         if flags & QtWidgets.QTextDocument.FindCaseSensitively:
@@ -383,139 +550,6 @@ class ScriptEdit(QtWidgets.QTextEdit):
             self.document().setModified(False)
             self.changed_timer.start()
 
-    @staticmethod
-    def format_paragraph(text,indent,width):
-        lines = []
-        line = []
-        c = 0
-        for word in text.split():
-            if c + len(line) + len(word) > width:
-
-                b = len(word)
-                while True:
-                    i = word.rfind('-',0,b)
-                    if i == -1:
-                        break
-                    if c + len(line) + i + 1 <= width:
-                        line.append(word[:i+1])
-                        lines.append(" "*indent + " ".join(line))
-                        line = []
-                        c = 0
-                        word = word[i+1:]
-                        b = len(word)
-                        if b <= width:
-                            break
-                    else:
-                        b = i
-                if c != 0:
-                    lines.append(" "*indent + " ".join(line))
-                    line = []
-                    c = 0
-            line.append(word)
-            c += len(word)
-        if len(line) != 0:
-            lines.append(" "*indent + " ".join(line))
-        return lines
-
-    def format(self,xdownplay):
-        text = []
-        for xp in xdownplay.findall('p'):
-            if xp.text in (None,""):
-                text.append("")
-                continue
-            style = xp.attrib["style"]
-            if style == "ACTION":
-                text.extend(self.format_paragraph(xp.text,0,60))
-            elif style == "DIALOGUE":
-                text.extend(self.format_paragraph(xp.text,10,30))
-            elif style == "NAME":
-                text.extend(self.format_paragraph(xp.text,20,20))
-            elif style == "PARENTHETICAL":
-                text.extend(self.format_paragraph(xp.text,15,25))
-            elif style == "TRANSITION":
-                text.extend(self.format_paragraph(xp.text,45,15))
-            else:
-                assert False
-
-        text.append("")
-        return "\n".join(text)
-
-    def paginate(self,xdownplay):
-        def page_break():
-            nonlocal line_number, page_number, eat_space
-            while line_number < 60:
-                text.append("")
-                line_number += 1
-            line_number = 0
-            page_number += 1
-            eat_space = True
-        def add_line(line):
-            nonlocal line_number, page_number, eat_space
-            if eat_space and line in (None,""):
-                eat_space = False
-                return
-            while line_number < 4:
-                if line_number == 2 and page_number > 1:
-                    text.append("%*s%d." % (55,"",page_number))
-                else:
-                    text.append("")
-                line_number += 1
-            text.append(line)
-            line_number += 1
-            if line_number >= 56:
-                page_break()
-            else:
-                eat_space = False
-        def add_lines(lines):
-            for line in lines:
-                add_line(line)
-        def add_clump(reserve=0):
-            if len(clump) == 0:
-                return
-            if len(clump) > 10:  # don't even try
-                add_lines(clump)
-                clump.clear()
-                return
-            if line_number + len(clump) + reserve > 56:
-                page_break()
-            add_lines(clump)
-            clump.clear()
-        text = []
-        line_number = 0
-        page_number = 1
-        eat_space = False
-        clump = []
-        for xp in xdownplay.findall('p'):
-            if xp.text in (None,""):
-                add_clump()
-                add_line("")
-                continue
-            style = xp.attrib["style"]
-            if style == "ACTION":
-                add_clump()
-                add_lines(self.format_paragraph(xp.text,0,60))
-            elif style == "DIALOGUE":
-                paragraph = self.format_paragraph(xp.text,10,30)
-                add_clump(max(2,len(paragraph)))
-                while line_number + len(paragraph) > 56:
-                    n_balance = 55-line_number
-                    balance,paragraph = paragraph[:n_balance],paragraph[n_balance:]
-                    add_lines(balance)
-                    add_lines("%*s(MORE)" % (20,""))
-                add_lines(paragraph)
-            elif style == "NAME":
-                clump.extend(self.format_paragraph(xp.text,20,20))
-            elif style == "PARENTHETICAL":
-                clump.extend(self.format_paragraph(xp.text,15,25))
-            elif style == "TRANSITION":
-                add_clump()
-                add_lines(self.format_paragraph(xp.text,45,15))
-            else:
-                assert False
-        add_clump()
-        page_break()
-        return "\n".join(text)
-
     def export_as_text(self):
         self.export_as_text_common(False)
 
@@ -545,12 +579,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
                 if ext == "":
                     new_filename = "%s.txt" % stub
             xdownplay,warnings = self.extract_xml()
-            if paginated:
-                text = self.paginate(xdownplay)
-            else:
-                text = self.format(xdownplay)
-            with open(new_filename,"w",encoding='utf-8') as flo:
-                flo.write(text)
+            export_as_text(xdownplay,new_filename,paginated=paginated)
 
     def export_as_pdf(self):
         if self.last_dirname is not None:
@@ -571,23 +600,7 @@ class ScriptEdit(QtWidgets.QTextEdit):
                 if ext == "":
                     new_filename = "%s.pdf" % stub
             xdownplay,warnings = self.extract_xml()
-            text = self.paginate(xdownplay)
-            pdf = canvas.Canvas(new_filename,pagesize=pagesizes.letter)
-            font_set = False
-            line_number = 0
-            for line in text.split("\n"):
-                if line != "":
-                    if not font_set:
-                        pdf.setFont("Courier",12)
-                        font_set = True
-                    pdf.drawString(1.7*units.inch,10.5*units.inch-line_number*12,line)
-                line_number += 1
-                if line_number >= 60:
-                    line_number = 0
-                    pdf.showPage()
-                    font_set = False
-            pdf.save()
-
+            export_as_pdf(xdownplay,new_filename)
 
     def print_to_console(self):
         print("-"*79)
@@ -751,16 +764,12 @@ def populate_menu(menu,menu_def):
             def_error()
 
 
-def main():
-    ap = argparse.ArgumentParser(description='Invoke Downplay')
-    ap.add_argument("filename",default=None,nargs='?',help='File to open')
-    args = ap.parse_args()
-
+def gui(filename=None):
     app = QtWidgets.QApplication([])
 
     script_edit = ScriptEdit()
-    if args.filename is not None:
-        script_edit.open_filename(args.filename)
+    if filename is not None:
+        script_edit.open_filename(filename)
 
     search_dialog = SearchDialog()
     search_dialog.findRequested.connect(script_edit.find_in_document)
@@ -828,6 +837,36 @@ def main():
     win.show()
 
     app.exec_()
+
+
+def convert(downplay_filenames,output_filename):
+    xdownplay = ET.Element('downplay',format="1.0")
+    for i,filename in enumerate(downplay_filenames):
+        if not filename.endswith('.dply'):
+            raise RuntimeError('input filenames must all be downplay files')
+        if i != 0:
+            ET.SubElement(xdownplay,'p',style='ACTION')
+        xsdp = ET.parse(filename).getroot()
+        xdownplay.extend(xsdp[:])
+    if output_filename.endswith('.pdf'):
+        if not HAS_REPORTLAB:
+            raise RuntimeError("can't import reportlab")
+        export_as_pdf(xdownplay,output_filename)
+    elif output_filename.endswith('.txt'):
+        export_as_text(xdownplay,output_filename)
+    else:
+        raise RuntimeError('out filenames must all be text or PDF')
+
+
+def main():
+    ap = argparse.ArgumentParser(description='Invoke Downplay')
+    ap.add_argument("filename",default=None,nargs='?',help='File to open')
+    ap.add_argument("--convert",default=None,nargs='*',metavar="FILENAME",help="Convert a downplay flies to a PDF/TXT file")
+    args = ap.parse_args()
+    if args.convert is not None:
+        convert(args.convert[:-1],args.convert[-1])
+    else:
+        gui(args.filename)
 
 
 if __name__ == '__main__':
